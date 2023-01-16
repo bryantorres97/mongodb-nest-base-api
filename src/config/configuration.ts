@@ -1,7 +1,7 @@
 export default () => ({
   port: parseInt(process.env.SERVER_PORT, 10) || 3000,
   database: {
-    uri: process.env.DB_URL || '',
+    uri: process.env.DB_URI || '',
   },
   jwt: {
     secret: process.env.JWT_SECRET,

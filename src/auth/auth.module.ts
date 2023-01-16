@@ -7,6 +7,8 @@ import { AuthService } from './auth.service';
 import { JwtStrategy, LocalStrategy } from './strategies';
 import { UsersModule } from '../users/users.module';
 import { JWT_EXPIRES_IN, JWT_SECRET } from '../config/configuration';
+import { CoacServicesModule } from '../coac-services/coac-services.module';
+import { LoginLogsModule } from '../login-logs/login-logs.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { JWT_EXPIRES_IN, JWT_SECRET } from '../config/configuration';
         signOptions: { expiresIn: config.get<string>(JWT_EXPIRES_IN) },
       }),
     }),
+    CoacServicesModule,
+    LoginLogsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, LocalStrategy, JwtStrategy],

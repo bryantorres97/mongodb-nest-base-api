@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common/exceptions';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { LoginDto } from 'src/auth/dto';
+import { Model, Types } from 'mongoose';
+import { LoginDto } from '../auth/dto';
 import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserCredentialsDto } from './dto/update-user-credentials.dto';
 import { UserDocument, UserModelName } from './schemas/user.schema';
 
 @Injectable()
@@ -13,25 +14,80 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto) {
+    const { username, ci } = createUserDto;
+    const existsUserByUsername = await this.userModel.findOne({
+      username,
+      isActive: true,
+    });
+
+    if (existsUserByUsername)
+      throw new BadRequestException(
+        `El nombre de usuario ${username} ya existe`,
+      );
+
+    const existsUserByCi = await this.userModel.findOne({ ci, isActive: true });
+
+    if (existsUserByCi)
+      throw new BadRequestException(
+        `El usuario con número de cédula ${ci} ya se encuentra registrado`,
+      );
+
     return await this.userModel.create(createUserDto);
   }
 
   async findAll() {
-    return await this.userModel.find(
-      { isActive: true },
-      { createdAt: 0, updatedAt: 0, __v: 0 },
-    );
+    return await this.userModel.find({ isActive: true }, { __v: 0 });
   }
 
   async findOne(user: { _id?: string; username?: string }) {
     return await this.userModel.findOne({ ...user, isActive: true });
   }
 
-  async update(_id: string, updateUserDto: UpdateUserDto) {
+  async updateCredentials(
+    _id: Types.ObjectId,
+    updateUserDto: UpdateUserCredentialsDto,
+  ) {
+    const user = await this.userModel.findOne({ _id, isActive: true });
+    if (!user) return null;
+
+    if (updateUserDto.password) user.password = updateUserDto.password;
+
+    if (updateUserDto.pin) user.pin = updateUserDto.pin;
+
+    if (user.blockStatus !== 'FALSE') {
+      user.blockStatus = 'FALSE';
+      user.lastLogin = new Date();
+    }
+
+    return await user.save();
+  }
+
+  async unblockUser(_id: Types.ObjectId) {
     return await this.userModel.findOneAndUpdate(
       { _id, isActive: true },
-      { ...updateUserDto },
+      {
+        blockStatus: 'FALSE',
+      },
       { new: true },
+    );
+  }
+
+  async blockUser(_id: Types.ObjectId) {
+    return await this.userModel.findOneAndUpdate(
+      { _id, isActive: true },
+      {
+        blockStatus: 'BLOCKED',
+      },
+      { new: true },
+    );
+  }
+
+  async updateLastLogin(_id: Types.ObjectId) {
+    return await this.userModel.findOneAndUpdate(
+      { _id, isActive: true },
+      {
+        lastLogin: new Date(),
+      },
     );
   }
 
