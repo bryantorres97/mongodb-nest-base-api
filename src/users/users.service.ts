@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common/exceptions';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { LoginDto } from '../auth/dto';
+import { BiometricLoginDto, LoginDto } from '../auth/dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserCredentialsDto } from './dto/update-user-credentials.dto';
 import { UserDocument, UserModelName } from './schemas/user.schema';
@@ -39,7 +39,7 @@ export class UsersService {
     return await this.userModel.find({ isActive: true }, { __v: 0 });
   }
 
-  async findOne(user: { _id?: string; username?: string }) {
+  async findOne(user: { _id?: string; username?: string; ci?: string }) {
     return await this.userModel.findOne({ ...user, isActive: true });
   }
 
@@ -103,6 +103,26 @@ export class UsersService {
     const { username, password } = loginDto;
     const user = await this.userModel.findOne({ username, isActive: true });
     if (user && (await user.comparePassword(password))) return user;
+    return null;
+  }
+
+  async validateUserPin(loginDto: { ci: string; pin: string }) {
+    const { ci, pin } = loginDto;
+    const user = await this.userModel.findOne({ ci, isActive: true });
+    if (user && (await user.comparePin(pin))) return user;
+    return null;
+  }
+
+  async validateUserBiometric(loginDto: BiometricLoginDto) {
+    const { ci } = loginDto;
+    const user = await this.userModel.findOne({
+      ci,
+      isActive: true,
+      faceId: true,
+    });
+
+    if (user) return user;
+
     return null;
   }
 }

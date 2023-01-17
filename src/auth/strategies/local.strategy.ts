@@ -32,7 +32,12 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
 
     const userByUsername = await this.usersService.findOne({ username });
 
-    if (userByUsername && userByUsername.blockStatus !== 'FALSE') {
+    if (!userByUsername) {
+      this.logger.debug(`El usuario ${username} no existe`);
+      throw new UnauthorizedException('Usuario o contraseña incorrectos');
+    }
+
+    if (userByUsername.blockStatus !== 'FALSE') {
       await this.loginLogsService.createLoginLog({
         ip: ipAddresses,
         username,
@@ -54,10 +59,10 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
         username,
         userByUsername.lastLogin,
       );
+      this.logger.debug('Incorrect logins: ' + incorrectLogins);
 
       // TODO - Leer cantidad de intentos desde variable de entorno o base de datos
       if (incorrectLogins >= 3) {
-        this.logger.debug('Incorrect logins: ' + incorrectLogins);
         await this.usersService.blockUser(userByUsername._id);
       }
       throw new UnauthorizedException('Usuario o contraseña incorrectos');

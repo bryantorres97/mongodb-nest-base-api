@@ -6,10 +6,11 @@ import {
   Body,
   Get,
   Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Authentication, GetUser } from './decorators';
-import { LoginDto } from './dto';
+import { BiometricLoginDto, LoginDto, PinLoginDto } from './dto';
 import { LocalAuthGuard } from './guards';
 // import { LocalAuthGuard } from './guards/';
 import { UserDocument } from '../users/schemas/user.schema';
@@ -25,6 +26,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ErrorData } from '../common/interfaces/error-data.interface';
+import { LoginLogsService } from '../login-logs/login-logs.service';
+import { UsersService } from '../users/users.service';
+import { UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('Autenticación')
 @Controller('auth')
@@ -33,6 +37,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly coacServices: CoacServicesService,
+    private loginLogsService: LoginLogsService,
+    private usersService: UsersService,
   ) {}
 
   @UseGuards(LocalAuthGuard)
@@ -43,15 +49,138 @@ export class AuthController {
     @GetUser() user: UserDocument,
   ) {
     this.logger.log('Logging in user ' + loginDto.username);
-    const ipAddress = req.socket.remoteAddress;
-    this.logger.log('IP Address: ' + ipAddress);
+
+    const userData = this.authService.login(user);
+    return userData;
+  }
+
+  @Post('pin-login')
+  async pinLogin(@Req() req: Request, @Body() loginDto: PinLoginDto) {
+    this.logger.log('Logging in user ' + loginDto.ci);
+
+    const { ci } = loginDto;
+
     const ipAddresses =
       req.header('x-forwarded-for') || req.socket.remoteAddress;
-    console.log(
-      '🚀 ~ file: auth.controller.ts:49 ~ AuthController ~ ipAddresses',
-      ipAddresses,
-    );
+    this.logger.debug('IP Address: ' + ipAddresses);
+
+    const userByCi = await this.usersService.findOne({ ci });
+
+    if (!userByCi) {
+      this.logger.debug(`El usuario con cédula ${ci} no existe`);
+      throw new UnauthorizedException('Usuario o contraseña incorrectos');
+    }
+
+    if (userByCi && userByCi.blockStatus !== 'FALSE') {
+      await this.loginLogsService.createLoginLog({
+        ip: ipAddresses,
+        username: userByCi.username,
+        blockStatus: userByCi.blockStatus,
+        isCorrect: false,
+      });
+      throw new ForbiddenException('Usuario bloqueado');
+    }
+
+    const user = await this.usersService.validateUserPin(loginDto);
+
+    if (!user) {
+      await this.loginLogsService.createLoginLog({
+        ip: ipAddresses,
+        username: loginDto.ci,
+        blockStatus: userByCi.blockStatus,
+        isCorrect: false,
+      });
+
+      const incorrectLogins = await this.loginLogsService.countBadLoginLogs(
+        ci,
+        userByCi.lastLogin,
+      );
+
+      // TODO - Leer cantidad de intentos desde variable de entorno o base de datos
+      if (incorrectLogins >= 3) {
+        this.logger.debug('Incorrect logins: ' + incorrectLogins);
+        await this.usersService.blockUser(userByCi._id);
+      }
+      throw new UnauthorizedException('Usuario o contraseña incorrectos');
+    }
+
+    await this.loginLogsService.createLoginLog({
+      ip: ipAddresses,
+      username: userByCi.username,
+      blockStatus: userByCi.blockStatus,
+      isCorrect: true,
+    });
+
+    await this.usersService.updateLastLogin(user._id);
     const userData = this.authService.login(user);
+    return userData;
+  }
+
+  @Post('biometric-login')
+  async create(@Req() req: Request, @Body() data: BiometricLoginDto) {
+    this.logger.log('Logging in user ' + data.ci);
+
+    const { ci } = data;
+
+    const ipAddresses =
+      req.header('x-forwarded-for') || req.socket.remoteAddress;
+    this.logger.debug('IP Address: ' + ipAddresses);
+
+    const userByCi = await this.usersService.findOne({ ci });
+
+    if (!userByCi) {
+      this.logger.debug(`El usuario con cédula ${ci} no existe`);
+      throw new UnauthorizedException('Usuario o contraseña incorrectos');
+    }
+
+    if (userByCi && userByCi.blockStatus !== 'FALSE') {
+      await this.loginLogsService.createLoginLog({
+        ip: ipAddresses,
+        username: userByCi.username,
+        blockStatus: userByCi.blockStatus,
+        isCorrect: false,
+      });
+      throw new ForbiddenException('Usuario bloqueado');
+    }
+
+    if (!userByCi.faceId) {
+      this.logger.debug(`El usuario con cédula ${ci} no tiene huella digital`);
+      throw new UnauthorizedException('Usuario no tiene huella digital');
+    }
+
+    // const user = await this.usersService.validateUserBiometric(data);
+
+    // if (!user) {
+    //   await this.loginLogsService.createLoginLog({
+    //     ip: ipAddresses,
+    //     username: ci,
+    //     blockStatus: userByCi.blockStatus,
+    //     isCorrect: false,
+    //   });
+
+    //   const incorrectLogins = await this.loginLogsService.countBadLoginLogs(
+    //     ci,
+    //     userByCi.lastLogin,
+    //   );
+
+    //   // TODO - Leer cantidad de intentos desde variable de entorno o base de datos
+    //   if (incorrectLogins >= 3) {
+    //     this.logger.debug('Incorrect logins: ' + incorrectLogins);
+    //     await this.usersService.blockUser(userByCi._id);
+    //   }
+    //   this.logger.debug('Incorrect logins: ' + incorrectLogins);
+    //   throw new UnauthorizedException('Usuario o contraseña incorrectos');
+    // }
+
+    await this.loginLogsService.createLoginLog({
+      ip: ipAddresses,
+      username: userByCi.username,
+      blockStatus: userByCi.blockStatus,
+      isCorrect: true,
+    });
+    this.logger.debug('Correct logins: ' + userByCi.username);
+    await this.usersService.updateLastLogin(userByCi._id);
+    const userData = this.authService.login(userByCi);
     return userData;
   }
 
